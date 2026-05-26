@@ -1,0 +1,15 @@
+[project]
+name = "bias-duel"
+version = "0.1.0"
+description = "Welcome to the BiasDuel repository. This repository supports research on dueling bandit algorithms for tackling biased evaluators."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "joblib==1.4.2",
+    "matplotlib==3.10.0",
+    "numpy==2.1.3",
+    "openpyxl==3.1.5",
+    "pandas==2.2.3",
+    "scipy==1.14.1",
+    "seaborn==0.13.2",
+]
