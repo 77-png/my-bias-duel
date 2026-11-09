@@ -16,22 +16,22 @@ class MyGroupBiasUCB(BiasAlgorithm, CondorcetProducer):
         time_horizon: int   = 3000,
         random_state        = None,
         alpha:         float = 0.51,
-        epsilon:       float = 0.4,
+        epsilon:       float = 0.1,
         em_iters:      int   = 15,
         em_restarts:   int   = 5,
         gd_lr:         float = 0.03,
         gd_iters:      int   = 150,
-        lambda_q:      float = 0.005,
+        lambda_q:      float = 0.010,
         em_refit_freq: int   = 200,
         warmup_obs_per_user_pair: int = 5,
         warmup_max_frac:  float = 0.5,
         gd_stability_gate: float = 1e-4,
         recent_decay: float = 0.95,
-        # 【新增】消融控制参数
         use_spectral_init:      bool = True,
         use_svd_init:           bool = True,
         cross_group_correction: bool = True,
-        debug:         bool  = False,
+        cross_group_prob: float = 0.1,
+        debug: bool = False,
     ):
         super().__init__({}, feedback_mechanism, time_horizon)
 
@@ -68,6 +68,7 @@ class MyGroupBiasUCB(BiasAlgorithm, CondorcetProducer):
         raw_warmup = pairs_count * self.M * warmup_obs_per_user_pair
         self._WARMUP_ROUNDS = min(raw_warmup,
                                   int(time_horizon * warmup_max_frac))
+        # self._WARMUP_ROUNDS = 750
 
         self.time_step    = 0
         self.time_horizon = time_horizon
@@ -100,6 +101,13 @@ class MyGroupBiasUCB(BiasAlgorithm, CondorcetProducer):
         self.use_spectral_init       = use_spectral_init
         self.use_svd_init            = use_svd_init
         self.cross_group_correction  = cross_group_correction
+        self.cross_group_prob = cross_group_prob
+
+        self.total_selection_duels = 0
+        self.cross_group_duels = 0
+        self.forced_cross_group_duels = 0
+        self.forced_cross_group_count = 0
+        self.total_duels = 0
 
     # ── helpers ───────────────────────────────────────────────────────
 
@@ -350,14 +358,49 @@ class MyGroupBiasUCB(BiasAlgorithm, CondorcetProducer):
             sc2[i] = -np.inf
             j = int(np.argmax(sc2))
 
-        if (self.cross_group_correction and 
-            self._model_fitted and 
-            self.g.std() > 0.1):
-            cross = [x for x in range(self.K) if self.g[x] != self.g[i]]
-            if cross and self.g[i] == self.g[j]:
-                j = int(self.random_state.choice(cross))
+        original_j = j
+
+        if (
+            self.cross_group_prob > 0
+            and self._model_fitted
+            and self.g.std() > 0.1
+        ):
+
+            cross = [
+                x for x in range(self.K)
+                if self.g[x] != self.g[i]
+            ]
+
+            if (
+                cross
+                and self.g[i] == self.g[j]
+                and self.random_state.rand()
+                < self.cross_group_prob
+            ):
+                j = int(
+                    self.random_state.choice(cross)
+                )
+
+        self.total_selection_duels += 1
+
+        if (
+            self._model_fitted
+            and self.g[i] != self.g[j]
+        ):
+            self.cross_group_duels += 1
 
         return i, j
+
+    def get_cross_group_stats(self):
+        return {
+            "total_selection_duels": self.total_selection_duels,
+            "cross_group_duels": self.cross_group_duels,
+            "forced_cross_group_duels": self.forced_cross_group_duels,
+            "cross_group_ratio": (
+                self.cross_group_duels /
+                max(self.total_selection_duels, 1)
+            ),
+        }
 
     # ── main step ─────────────────────────────────────────────────────
 
@@ -372,7 +415,16 @@ class MyGroupBiasUCB(BiasAlgorithm, CondorcetProducer):
         else:
             if not self._model_fitted:
                 self._fit_model()
+
             arm_c, arm_d = self._select_pair()
+
+            # if self.time_step >= 1400:
+            #     print(
+            #         self.time_step,
+            #         arm_c,
+            #         arm_d
+            #     )
+
             user = int(self.random_state.randint(0, self.M))
 
         raw = self._base_env.duel(arm_c, arm_d, user)
@@ -394,7 +446,7 @@ class MyGroupBiasUCB(BiasAlgorithm, CondorcetProducer):
     # ── interface ─────────────────────────────────────────────────────
 
     def get_condorcet_winner(self) -> int:
-        return int(np.argmax(self._skill_vector()))
+        return int(np.argmax(self.q))
 
     def is_finished(self) -> bool:
         return self.time_step >= self.time_horizon

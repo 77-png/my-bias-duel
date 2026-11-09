@@ -139,14 +139,31 @@ class BradleyTerryLuceModelBias(MatrixFeedback):
             random_state=random_state,
         )
         self.duels = 0
+        self.duel_history = []
 
     def duel(self, arm_i: int, arm_j: int, user: int = None) -> bool:
         """
         Biased duel. Returns True if arm_i wins.
-        user: evaluator index; sampled uniformly if None.
+
+        Parameters
+        ----------
+        arm_i, arm_j : int
+            The two compared arms.
+        user : int, optional
+            Evaluator index. If None, an evaluator is sampled uniformly.
+
+        Notes
+        -----
+        Every duel is recorded in ``self.duel_history`` for
+        cumulative weak-regret evaluation.
         """
         if user is None:
             user = int(self.random_state.randint(0, self.num_users))
+
+        # Record the actual pair selected by the algorithm.
+        self.duel_history.append(
+            (int(arm_i), int(arm_j), int(user))
+        )
 
         theta = float(self.user_bias[int(user)])
         s_i = self.skill_vector[arm_i] + theta * self.g[arm_i]
@@ -154,6 +171,7 @@ class BradleyTerryLuceModelBias(MatrixFeedback):
 
         p = 1.0 / (1.0 + np.exp(-(s_i - s_j)))
         result = bool(self.random_state.rand() < p)
+
         self.duels += 1
         return result
 
